@@ -1,0 +1,20 @@
+# Binaries
+server
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go build/test artifacts
+*.test
+*.out
+coverage.out
+
+# Dependency/vendor directories (optional)
+vendor/
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
