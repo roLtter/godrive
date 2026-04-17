@@ -9,17 +9,20 @@ import (
 )
 
 func main() {
-	const port = "8080"
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
+	}
 
-	log.Printf("migrations path: %s (set MIGRATIONS_PATH to override)", config.MigrationsPath())
+	log.Printf("migrations path: %s", cfg.MigrationsPath)
 
 	router := gin.Default()
 	router.GET("/health", func(c *gin.Context) {
 		c.String(200, "OK")
 	})
 
-	log.Printf("cloudstore server starting on :%s", port)
-	if err := router.Run(":" + port); err != nil {
+	log.Printf("cloudstore server starting on :%s", cfg.Port)
+	if err := router.Run(":" + cfg.Port); err != nil {
 		log.Fatalf("failed to start server: %v", err)
 	}
 }

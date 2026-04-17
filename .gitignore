@@ -9,8 +9,12 @@ server
 # Go build/test artifacts
 *.test
 *.out
+*.log
 coverage.out
 coverage.html
+bin/
+tmp/
+.cache/
 
 # Local env (keep .env.example committed if you add one)
 .env
