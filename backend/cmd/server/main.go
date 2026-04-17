@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"log"
+	"time"
 
+	redisClient "cloudstore/backend/internal/cache/redis"
 	"cloudstore/backend/internal/config"
 	_ "cloudstore/backend/internal/dbmigrate"
 	"cloudstore/backend/internal/logger"
@@ -31,6 +33,31 @@ func main() {
 		zap.String("app_env", cfg.AppEnv),
 	)
 	zlog.Info("migrations path", zap.String("path", cfg.MigrationsPath))
+
+	redisCfg := redisClient.Config{
+		URL:          cfg.RedisURL,
+		DialTimeout:  time.Duration(cfg.RedisTimeoutMS) * time.Millisecond,
+		ReadTimeout:  time.Duration(cfg.RedisTimeoutMS) * time.Millisecond,
+		WriteTimeout: time.Duration(cfg.RedisTimeoutMS) * time.Millisecond,
+		PoolSize:     cfg.RedisPoolSize,
+		MinIdleConns: cfg.RedisMinIdle,
+	}
+	rdb, err := redisClient.New(context.Background(), redisCfg)
+	if err != nil {
+		zlog.Fatal("failed to init redis client", zap.Error(err))
+	}
+	defer func() {
+		if cerr := rdb.Close(); cerr != nil {
+			zlog.Warn("failed to close redis client", zap.Error(cerr))
+		}
+	}()
+	if err := rdb.HealthCheck(context.Background()); err != nil {
+		zlog.Fatal("redis health check failed", zap.Error(err))
+	}
+	zlog.Info("redis client initialized",
+		zap.Int("pool_size", cfg.RedisPoolSize),
+		zap.Int("min_idle_conns", cfg.RedisMinIdle),
+	)
 
 	if _, err := minioClient.New(
 		context.Background(),
