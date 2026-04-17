@@ -17,6 +17,7 @@ import (
 type LoginHandler struct {
 	db          *postgres.Client
 	tokenIssuer *TokenIssuer
+	refreshStore *RefreshStore
 }
 
 type loginRequest struct {
@@ -25,9 +26,11 @@ type loginRequest struct {
 }
 
 type loginResponse struct {
-	AccessToken string    `json:"access_token"`
-	TokenType   string    `json:"token_type"`
-	ExpiresAt   time.Time `json:"expires_at"`
+	AccessToken      string    `json:"access_token"`
+	TokenType        string    `json:"token_type"`
+	AccessExpiresAt  time.Time `json:"access_expires_at"`
+	RefreshToken     string    `json:"refresh_token"`
+	RefreshExpiresAt time.Time `json:"refresh_expires_at"`
 }
 
 type userCredentials struct {
@@ -37,10 +40,11 @@ type userCredentials struct {
 }
 
 // NewLoginHandler creates login endpoint handler.
-func NewLoginHandler(db *postgres.Client, tokenIssuer *TokenIssuer) *LoginHandler {
+func NewLoginHandler(db *postgres.Client, tokenIssuer *TokenIssuer, refreshStore *RefreshStore) *LoginHandler {
 	return &LoginHandler{
 		db:          db,
 		tokenIssuer: tokenIssuer,
+		refreshStore: refreshStore,
 	}
 }
 
@@ -78,11 +82,22 @@ func (h *LoginHandler) Handle(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue token"})
 		return
 	}
+	refreshToken, refreshExpiresAt, err := h.tokenIssuer.IssueRefreshToken()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue token"})
+		return
+	}
+	if err := h.refreshStore.Save(c.Request.Context(), refreshToken, user.ID, time.Until(refreshExpiresAt)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist refresh token"})
+		return
+	}
 
 	c.JSON(http.StatusOK, loginResponse{
-		AccessToken: accessToken,
-		TokenType:   "Bearer",
-		ExpiresAt:   expiresAt,
+		AccessToken:      accessToken,
+		TokenType:        "Bearer",
+		AccessExpiresAt:  expiresAt,
+		RefreshToken:     refreshToken,
+		RefreshExpiresAt: refreshExpiresAt,
 	})
 }
 

@@ -16,6 +16,7 @@ const (
 	defaultRedisMinIdle   = 5
 	defaultRedisTimeoutMS = 5000
 	defaultJWTAccessTTLMin = 15
+	defaultJWTRefreshTTLMin = 10080
 )
 
 // Config is the single source of runtime environment settings.
@@ -27,6 +28,7 @@ type Config struct {
 	RedisTimeoutMS int
 	JWTSecret      string
 	JWTAccessTTLMin int
+	JWTRefreshTTLMin int
 	MinIOURL       string
 	MinIORootUser  string
 	MinIORootPass  string
@@ -52,6 +54,7 @@ func Load() (Config, error) {
 	v.SetDefault("REDIS_MIN_IDLE_CONNS", defaultRedisMinIdle)
 	v.SetDefault("REDIS_TIMEOUT_MS", defaultRedisTimeoutMS)
 	v.SetDefault("JWT_ACCESS_TTL_MIN", defaultJWTAccessTTLMin)
+	v.SetDefault("JWT_REFRESH_TTL_MIN", defaultJWTRefreshTTLMin)
 
 	cfg := Config{
 		DBURL:          v.GetString("DB_URL"),
@@ -61,6 +64,7 @@ func Load() (Config, error) {
 		RedisTimeoutMS: v.GetInt("REDIS_TIMEOUT_MS"),
 		JWTSecret:      v.GetString("JWT_SECRET"),
 		JWTAccessTTLMin: v.GetInt("JWT_ACCESS_TTL_MIN"),
+		JWTRefreshTTLMin: v.GetInt("JWT_REFRESH_TTL_MIN"),
 		MinIOURL:       v.GetString("MINIO_URL"),
 		MinIORootUser:  v.GetString("MINIO_ROOT_USER"),
 		MinIORootPass:  v.GetString("MINIO_ROOT_PASSWORD"),
@@ -103,6 +107,9 @@ func (c Config) Validate() error {
 	}
 	if c.JWTAccessTTLMin <= 0 {
 		return fmt.Errorf("config validation failed: JWT_ACCESS_TTL_MIN must be > 0")
+	}
+	if c.JWTRefreshTTLMin <= 0 {
+		return fmt.Errorf("config validation failed: JWT_REFRESH_TTL_MIN must be > 0")
 	}
 	if c.MinIOBucket == "" {
 		return fmt.Errorf("config validation failed: MINIO_BUCKET is required")

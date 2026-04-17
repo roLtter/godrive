@@ -98,13 +98,27 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(middleware.RequestLogger(zlog))
-	tokenIssuer := auth.NewTokenIssuer(cfg.JWTSecret, cfg.JWTAccessTTLMin)
+	tokenIssuer := auth.NewTokenIssuer(cfg.JWTSecret, cfg.JWTAccessTTLMin, cfg.JWTRefreshTTLMin)
+	refreshStore := auth.NewRefreshStore(rdb)
 	registerHandler := auth.NewRegisterHandler(db)
-	loginHandler := auth.NewLoginHandler(db, tokenIssuer)
+	loginHandler := auth.NewLoginHandler(db, tokenIssuer, refreshStore)
+	refreshHandler := auth.NewRefreshHandler(db, tokenIssuer, refreshStore)
 	router.POST("/register", registerHandler.Handle)
 	router.POST("/login", loginHandler.Handle)
+	router.POST("/refresh", refreshHandler.Handle)
 	router.GET("/health", func(c *gin.Context) {
 		c.String(200, "OK")
+	})
+
+	protected := router.Group("/api")
+	protected.Use(middleware.JWTAuth(cfg.JWTSecret))
+	protected.GET("/me", func(c *gin.Context) {
+		userID, _ := c.Get(middleware.ContextUserIDKey)
+		email, _ := c.Get(middleware.ContextUserEmailKey)
+		c.JSON(200, gin.H{
+			"user_id": userID,
+			"email":   email,
+		})
 	})
 
 	zlog.Info("cloudstore server starting", zap.String("port", cfg.Port))
