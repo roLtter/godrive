@@ -6,6 +6,7 @@ import (
 	"time"
 
 	redisClient "cloudstore/backend/internal/cache/redis"
+	redisv9 "github.com/redis/go-redis/v9"
 )
 
 // RefreshStore persists refresh tokens in Redis.
@@ -34,6 +35,9 @@ func (s *RefreshStore) Save(ctx context.Context, token, userID string, ttl time.
 func (s *RefreshStore) Rotate(ctx context.Context, oldToken, newToken string, ttl time.Duration) (string, error) {
 	userID, err := s.redis.Get(ctx, s.key(oldToken)).Result()
 	if err != nil {
+		if err == redisv9.Nil {
+			return "", fmt.Errorf("refresh token not found")
+		}
 		return "", fmt.Errorf("refresh token not found")
 	}
 
@@ -45,4 +49,16 @@ func (s *RefreshStore) Rotate(ctx context.Context, oldToken, newToken string, tt
 	}
 
 	return userID, nil
+}
+
+// Invalidate removes refresh token from Redis.
+func (s *RefreshStore) Invalidate(ctx context.Context, token string) error {
+	res, err := s.redis.Del(ctx, s.key(token)).Result()
+	if err != nil {
+		return fmt.Errorf("invalidate refresh token: %w", err)
+	}
+	if res == 0 {
+		return fmt.Errorf("refresh token not found")
+	}
+	return nil
 }

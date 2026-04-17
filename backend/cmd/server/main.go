@@ -103,9 +103,11 @@ func main() {
 	registerHandler := auth.NewRegisterHandler(db)
 	loginHandler := auth.NewLoginHandler(db, tokenIssuer, refreshStore)
 	refreshHandler := auth.NewRefreshHandler(db, tokenIssuer, refreshStore)
+	logoutHandler := auth.NewLogoutHandler(refreshStore)
 	router.POST("/register", registerHandler.Handle)
 	router.POST("/login", loginHandler.Handle)
 	router.POST("/refresh", refreshHandler.Handle)
+	router.POST("/logout", logoutHandler.Handle)
 	router.GET("/health", func(c *gin.Context) {
 		c.String(200, "OK")
 	})
