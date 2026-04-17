@@ -98,8 +98,11 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(middleware.RequestLogger(zlog))
+	tokenIssuer := auth.NewTokenIssuer(cfg.JWTSecret, cfg.JWTAccessTTLMin)
 	registerHandler := auth.NewRegisterHandler(db)
+	loginHandler := auth.NewLoginHandler(db, tokenIssuer)
 	router.POST("/register", registerHandler.Handle)
+	router.POST("/login", loginHandler.Handle)
 	router.GET("/health", func(c *gin.Context) {
 		c.String(200, "OK")
 	})
