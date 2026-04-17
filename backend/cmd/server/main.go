@@ -5,8 +5,10 @@ import (
 	"log"
 	"time"
 
+	"cloudstore/backend/internal/auth"
 	redisClient "cloudstore/backend/internal/cache/redis"
 	"cloudstore/backend/internal/config"
+	postgresClient "cloudstore/backend/internal/db/postgres"
 	_ "cloudstore/backend/internal/dbmigrate"
 	"cloudstore/backend/internal/logger"
 	"cloudstore/backend/internal/middleware"
@@ -33,6 +35,25 @@ func main() {
 		zap.String("app_env", cfg.AppEnv),
 	)
 	zlog.Info("migrations path", zap.String("path", cfg.MigrationsPath))
+
+	db, err := postgresClient.New(context.Background(), postgresClient.Config{
+		URL:             cfg.DBURL,
+		MaxOpenConns:    25,
+		MaxIdleConns:    10,
+		ConnMaxLifetime: 30 * time.Minute,
+	})
+	if err != nil {
+		zlog.Fatal("failed to init postgres client", zap.Error(err))
+	}
+	defer func() {
+		if cerr := db.Close(); cerr != nil {
+			zlog.Warn("failed to close postgres client", zap.Error(cerr))
+		}
+	}()
+	if err := db.HealthCheck(context.Background()); err != nil {
+		zlog.Fatal("postgres health check failed", zap.Error(err))
+	}
+	zlog.Info("postgres client initialized")
 
 	redisCfg := redisClient.Config{
 		URL:          cfg.RedisURL,
@@ -77,6 +98,8 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(middleware.RequestLogger(zlog))
+	registerHandler := auth.NewRegisterHandler(db)
+	router.POST("/register", registerHandler.Handle)
 	router.GET("/health", func(c *gin.Context) {
 		c.String(200, "OK")
 	})
