@@ -17,6 +17,8 @@ const (
 	defaultRedisTimeoutMS = 5000
 	defaultJWTAccessTTLMin = 15
 	defaultJWTRefreshTTLMin = 10080
+	defaultRateLimitRequests = 100
+	defaultRateLimitWindowSec = 60
 )
 
 // Config is the single source of runtime environment settings.
@@ -26,6 +28,8 @@ type Config struct {
 	RedisPoolSize  int
 	RedisMinIdle   int
 	RedisTimeoutMS int
+	RateLimitRequests int
+	RateLimitWindowSec int
 	JWTSecret      string
 	JWTAccessTTLMin int
 	JWTRefreshTTLMin int
@@ -53,6 +57,8 @@ func Load() (Config, error) {
 	v.SetDefault("REDIS_POOL_SIZE", defaultRedisPoolSize)
 	v.SetDefault("REDIS_MIN_IDLE_CONNS", defaultRedisMinIdle)
 	v.SetDefault("REDIS_TIMEOUT_MS", defaultRedisTimeoutMS)
+	v.SetDefault("RATE_LIMIT_REQUESTS", defaultRateLimitRequests)
+	v.SetDefault("RATE_LIMIT_WINDOW_SEC", defaultRateLimitWindowSec)
 	v.SetDefault("JWT_ACCESS_TTL_MIN", defaultJWTAccessTTLMin)
 	v.SetDefault("JWT_REFRESH_TTL_MIN", defaultJWTRefreshTTLMin)
 
@@ -62,6 +68,8 @@ func Load() (Config, error) {
 		RedisPoolSize:  v.GetInt("REDIS_POOL_SIZE"),
 		RedisMinIdle:   v.GetInt("REDIS_MIN_IDLE_CONNS"),
 		RedisTimeoutMS: v.GetInt("REDIS_TIMEOUT_MS"),
+		RateLimitRequests: v.GetInt("RATE_LIMIT_REQUESTS"),
+		RateLimitWindowSec: v.GetInt("RATE_LIMIT_WINDOW_SEC"),
 		JWTSecret:      v.GetString("JWT_SECRET"),
 		JWTAccessTTLMin: v.GetInt("JWT_ACCESS_TTL_MIN"),
 		JWTRefreshTTLMin: v.GetInt("JWT_REFRESH_TTL_MIN"),
@@ -101,6 +109,12 @@ func (c Config) Validate() error {
 	}
 	if c.RedisTimeoutMS <= 0 {
 		return fmt.Errorf("config validation failed: REDIS_TIMEOUT_MS must be > 0")
+	}
+	if c.RateLimitRequests <= 0 {
+		return fmt.Errorf("config validation failed: RATE_LIMIT_REQUESTS must be > 0")
+	}
+	if c.RateLimitWindowSec <= 0 {
+		return fmt.Errorf("config validation failed: RATE_LIMIT_WINDOW_SEC must be > 0")
 	}
 	if c.JWTSecret == "" {
 		return fmt.Errorf("config validation failed: JWT_SECRET is required")

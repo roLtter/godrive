@@ -98,6 +98,11 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(middleware.RequestLogger(zlog))
+	router.Use(middleware.RateLimiter(rdb, middleware.RateLimiterConfig{
+		Limit:     cfg.RateLimitRequests,
+		Window:    time.Duration(cfg.RateLimitWindowSec) * time.Second,
+		KeyPrefix: "api:ratelimit",
+	}))
 	tokenIssuer := auth.NewTokenIssuer(cfg.JWTSecret, cfg.JWTAccessTTLMin, cfg.JWTRefreshTTLMin)
 	refreshStore := auth.NewRefreshStore(rdb)
 	registerHandler := auth.NewRegisterHandler(db)
