@@ -5,8 +5,10 @@ import (
 	"log"
 	"time"
 
+	"cloudstore/backend/internal/auth"
 	redisClient "cloudstore/backend/internal/cache/redis"
 	"cloudstore/backend/internal/config"
+	postgresClient "cloudstore/backend/internal/db/postgres"
 	_ "cloudstore/backend/internal/dbmigrate"
 	"cloudstore/backend/internal/logger"
 	"cloudstore/backend/internal/middleware"
@@ -33,6 +35,25 @@ func main() {
 		zap.String("app_env", cfg.AppEnv),
 	)
 	zlog.Info("migrations path", zap.String("path", cfg.MigrationsPath))
+
+	db, err := postgresClient.New(context.Background(), postgresClient.Config{
+		URL:             cfg.DBURL,
+		MaxOpenConns:    25,
+		MaxIdleConns:    10,
+		ConnMaxLifetime: 30 * time.Minute,
+	})
+	if err != nil {
+		zlog.Fatal("failed to init postgres client", zap.Error(err))
+	}
+	defer func() {
+		if cerr := db.Close(); cerr != nil {
+			zlog.Warn("failed to close postgres client", zap.Error(cerr))
+		}
+	}()
+	if err := db.HealthCheck(context.Background()); err != nil {
+		zlog.Fatal("postgres health check failed", zap.Error(err))
+	}
+	zlog.Info("postgres client initialized")
 
 	redisCfg := redisClient.Config{
 		URL:          cfg.RedisURL,
@@ -77,8 +98,34 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(middleware.RequestLogger(zlog))
+	router.Use(middleware.RateLimiter(rdb, middleware.RateLimiterConfig{
+		Limit:     cfg.RateLimitRequests,
+		Window:    time.Duration(cfg.RateLimitWindowSec) * time.Second,
+		KeyPrefix: "api:ratelimit",
+	}))
+	tokenIssuer := auth.NewTokenIssuer(cfg.JWTSecret, cfg.JWTAccessTTLMin, cfg.JWTRefreshTTLMin)
+	refreshStore := auth.NewRefreshStore(rdb)
+	registerHandler := auth.NewRegisterHandler(db)
+	loginHandler := auth.NewLoginHandler(db, tokenIssuer, refreshStore)
+	refreshHandler := auth.NewRefreshHandler(db, tokenIssuer, refreshStore)
+	logoutHandler := auth.NewLogoutHandler(refreshStore)
+	router.POST("/register", registerHandler.Handle)
+	router.POST("/login", loginHandler.Handle)
+	router.POST("/refresh", refreshHandler.Handle)
+	router.POST("/logout", logoutHandler.Handle)
 	router.GET("/health", func(c *gin.Context) {
 		c.String(200, "OK")
+	})
+
+	protected := router.Group("/api")
+	protected.Use(middleware.JWTAuth(cfg.JWTSecret))
+	protected.GET("/me", func(c *gin.Context) {
+		userID, _ := c.Get(middleware.ContextUserIDKey)
+		email, _ := c.Get(middleware.ContextUserEmailKey)
+		c.JSON(200, gin.H{
+			"user_id": userID,
+			"email":   email,
+		})
 	})
 
 	zlog.Info("cloudstore server starting", zap.String("port", cfg.Port))
