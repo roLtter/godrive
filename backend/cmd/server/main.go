@@ -10,6 +10,7 @@ import (
 	"cloudstore/backend/internal/config"
 	postgresClient "cloudstore/backend/internal/db/postgres"
 	_ "cloudstore/backend/internal/dbmigrate"
+	"cloudstore/backend/internal/folders"
 	"cloudstore/backend/internal/logger"
 	"cloudstore/backend/internal/middleware"
 	minioClient "cloudstore/backend/internal/storage/minio"
@@ -119,6 +120,11 @@ func main() {
 
 	protected := router.Group("/api")
 	protected.Use(middleware.JWTAuth(cfg.JWTSecret))
+	foldersHandler := folders.NewHandler(db)
+	protected.POST("/folders", foldersHandler.Create)
+	protected.GET("/folders", foldersHandler.List)
+	protected.PATCH("/folders/:id", foldersHandler.Rename)
+	protected.DELETE("/folders/:id", foldersHandler.Delete)
 	protected.GET("/me", func(c *gin.Context) {
 		userID, _ := c.Get(middleware.ContextUserIDKey)
 		email, _ := c.Get(middleware.ContextUserEmailKey)
