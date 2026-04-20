@@ -122,7 +122,9 @@ func main() {
 	protected.Use(middleware.JWTAuth(cfg.JWTSecret))
 	foldersHandler := folders.NewHandler(db)
 	protected.POST("/folders", foldersHandler.Create)
+	protected.GET("/folders/resolve", foldersHandler.ResolvePath)
 	protected.GET("/folders", foldersHandler.List)
+	protected.GET("/folders/:id/breadcrumbs", foldersHandler.Breadcrumbs)
 	protected.PATCH("/folders/:id", foldersHandler.Rename)
 	protected.DELETE("/folders/:id", foldersHandler.Delete)
 	protected.GET("/me", func(c *gin.Context) {

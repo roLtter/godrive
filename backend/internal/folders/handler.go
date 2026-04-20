@@ -28,11 +28,16 @@ type renameFolderRequest struct {
 }
 
 type folderResponse struct {
-	ID       int64      `json:"id"`
-	UserID   string     `json:"user_id"`
-	ParentID *int64     `json:"parent_id,omitempty"`
-	Name     string     `json:"name"`
+	ID        int64      `json:"id"`
+	UserID    string     `json:"user_id"`
+	ParentID  *int64     `json:"parent_id,omitempty"`
+	Name      string     `json:"name"`
 	CreatedAt *time.Time `json:"created_at,omitempty"`
+}
+
+type breadcrumbItem struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 // NewHandler creates folders handler.
@@ -220,6 +225,92 @@ func (h *Handler) Delete(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// ResolvePath handles GET /api/folders/resolve?path=/a/b/c and returns folder + breadcrumbs.
+func (h *Handler) ResolvePath(c *gin.Context) {
+	userID, ok := authUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	rawPath := strings.TrimSpace(c.Query("path"))
+	if rawPath == "" || rawPath == "/" {
+		c.JSON(http.StatusOK, gin.H{
+			"folder":      nil,
+			"breadcrumbs": []breadcrumbItem{},
+		})
+		return
+	}
+
+	parts := normalizePathParts(rawPath)
+	if len(parts) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
+		return
+	}
+
+	folderID, err := h.resolveFolderByPath(c, userID, parts)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "path not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve path"})
+		return
+	}
+
+	folder, err := h.getFolderByID(c, userID, folderID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "path not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve path"})
+		return
+	}
+
+	breadcrumbs, err := h.loadBreadcrumbs(c, userID, folderID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve breadcrumbs"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"folder":      folder,
+		"breadcrumbs": breadcrumbs,
+	})
+}
+
+// Breadcrumbs handles GET /api/folders/:id/breadcrumbs.
+func (h *Handler) Breadcrumbs(c *gin.Context) {
+	userID, ok := authUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	folderID, ok := folderIDParam(c)
+	if !ok {
+		return
+	}
+
+	exists, err := h.folderBelongsToUser(c, userID, folderID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve breadcrumbs"})
+		return
+	}
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "folder not found"})
+		return
+	}
+
+	breadcrumbs, err := h.loadBreadcrumbs(c, userID, folderID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve breadcrumbs"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"items": breadcrumbs})
+}
+
 func (h *Handler) folderBelongsToUser(c *gin.Context, userID string, folderID int64) (bool, error) {
 	const query = `
 		SELECT EXISTS (
@@ -233,6 +324,85 @@ func (h *Handler) folderBelongsToUser(c *gin.Context, userID string, folderID in
 		return false, err
 	}
 	return exists, nil
+}
+
+func (h *Handler) getFolderByID(c *gin.Context, userID string, folderID int64) (folderResponse, error) {
+	const query = `
+		SELECT id, user_id, parent_id, name
+		FROM folders
+		WHERE id = $1 AND user_id = $2
+		LIMIT 1
+	`
+	var out folderResponse
+	err := h.db.QueryRowContext(c.Request.Context(), query, folderID, userID).
+		Scan(&out.ID, &out.UserID, &out.ParentID, &out.Name)
+	if err != nil {
+		return folderResponse{}, err
+	}
+	return out, nil
+}
+
+func (h *Handler) resolveFolderByPath(c *gin.Context, userID string, parts []string) (int64, error) {
+	var currentParent sql.NullInt64
+
+	for _, name := range parts {
+		const query = `
+			SELECT id
+			FROM folders
+			WHERE user_id = $1
+			  AND name = $2
+			  AND (($3::bigint IS NULL AND parent_id IS NULL) OR parent_id = $3::bigint)
+			LIMIT 1
+		`
+		var id int64
+		if err := h.db.QueryRowContext(c.Request.Context(), query, userID, name, currentParent).Scan(&id); err != nil {
+			return 0, err
+		}
+		currentParent = sql.NullInt64{Int64: id, Valid: true}
+	}
+
+	if !currentParent.Valid {
+		return 0, sql.ErrNoRows
+	}
+	return currentParent.Int64, nil
+}
+
+func (h *Handler) loadBreadcrumbs(c *gin.Context, userID string, folderID int64) ([]breadcrumbItem, error) {
+	const query = `
+		WITH RECURSIVE chain AS (
+			SELECT id, parent_id, name, 0 AS depth
+			FROM folders
+			WHERE id = $1 AND user_id = $2
+
+			UNION ALL
+
+			SELECT f.id, f.parent_id, f.name, chain.depth + 1
+			FROM folders f
+			INNER JOIN chain ON f.id = chain.parent_id
+			WHERE f.user_id = $2
+		)
+		SELECT id, name
+		FROM chain
+		ORDER BY depth DESC
+	`
+	rows, err := h.db.QueryContext(c.Request.Context(), query, folderID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]breadcrumbItem, 0)
+	for rows.Next() {
+		var item breadcrumbItem
+		if err := rows.Scan(&item.ID, &item.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 func authUserID(c *gin.Context) (string, bool) {
@@ -255,4 +425,21 @@ func folderIDParam(c *gin.Context) (int64, bool) {
 		return 0, false
 	}
 	return folderID, true
+}
+
+func normalizePathParts(rawPath string) []string {
+	trimmed := strings.TrimSpace(rawPath)
+	if trimmed == "" || trimmed == "/" {
+		return nil
+	}
+	chunks := strings.Split(trimmed, "/")
+	parts := make([]string, 0, len(chunks))
+	for _, chunk := range chunks {
+		name := strings.TrimSpace(chunk)
+		if name == "" {
+			continue
+		}
+		parts = append(parts, name)
+	}
+	return parts
 }
