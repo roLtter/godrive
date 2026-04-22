@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"strings"
 	"time"
 
 	"cloudstore/backend/internal/auth"
@@ -123,7 +124,8 @@ func main() {
 	protected := router.Group("/api")
 	protected.Use(middleware.JWTAuth(cfg.JWTSecret))
 	foldersHandler := folders.NewHandler(db)
-	filesHandler := files.NewHandler(db, storage)
+	allowedMIMEs := strings.Split(cfg.UploadAllowedMIMEs, ",")
+	filesHandler := files.NewHandler(db, storage, int64(cfg.UploadMaxSizeMB)*1024*1024, allowedMIMEs)
 	protected.POST("/upload", filesHandler.Upload)
 	protected.POST("/folders", foldersHandler.Create)
 	protected.GET("/folders/resolve", foldersHandler.ResolvePath)

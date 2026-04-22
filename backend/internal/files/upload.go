@@ -1,10 +1,13 @@
 package files
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"mime"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -19,8 +22,10 @@ import (
 
 // Handler provides files endpoints.
 type Handler struct {
-	db      *postgres.Client
-	storage *minioClient.Client
+	db           *postgres.Client
+	storage      *minioClient.Client
+	maxUploadSize int64
+	allowedMIME  map[string]struct{}
 }
 
 type uploadResponse struct {
@@ -34,8 +39,20 @@ type uploadResponse struct {
 }
 
 // NewHandler creates files handler.
-func NewHandler(db *postgres.Client, storage *minioClient.Client) *Handler {
-	return &Handler{db: db, storage: storage}
+func NewHandler(db *postgres.Client, storage *minioClient.Client, maxUploadSizeBytes int64, allowedMIMEs []string) *Handler {
+	allowed := make(map[string]struct{}, len(allowedMIMEs))
+	for _, item := range allowedMIMEs {
+		value := strings.TrimSpace(strings.ToLower(item))
+		if value != "" {
+			allowed[value] = struct{}{}
+		}
+	}
+	return &Handler{
+		db:            db,
+		storage:       storage,
+		maxUploadSize: maxUploadSizeBytes,
+		allowedMIME:   allowed,
+	}
 }
 
 // Upload handles POST /api/upload multipart file upload stream to MinIO.
@@ -67,6 +84,14 @@ func (h *Handler) Upload(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
 		return
 	}
+	if fileHeader.Size <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "empty file is not allowed"})
+		return
+	}
+	if fileHeader.Size > h.maxUploadSize {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "file exceeds max upload size"})
+		return
+	}
 
 	file, err := fileHeader.Open()
 	if err != nil {
@@ -81,12 +106,17 @@ func (h *Handler) Upload(c *gin.Context) {
 		return
 	}
 
-	contentType := strings.TrimSpace(fileHeader.Header.Get("Content-Type"))
-	if contentType == "" {
-		contentType = "application/octet-stream"
+	detectedMIME, streamReader, err := detectMIMEAndPrepareReader(file)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to inspect file mime"})
+		return
+	}
+	if _, ok := h.allowedMIME[detectedMIME]; !ok {
+		c.JSON(http.StatusUnsupportedMediaType, gin.H{"error": "unsupported file mime type"})
+		return
 	}
 
-	if err := h.storage.PutObject(c.Request.Context(), objectKey, file, fileHeader.Size, contentType); err != nil {
+	if err := h.storage.PutObject(c.Request.Context(), objectKey, streamReader, fileHeader.Size, detectedMIME); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload file"})
 		return
 	}
@@ -98,7 +128,7 @@ func (h *Handler) Upload(c *gin.Context) {
 	`
 	var out uploadResponse
 	if err := h.db.QueryRowContext(c.Request.Context(), query,
-		userID, folderID, fileHeader.Filename, fileHeader.Size, contentType, objectKey).
+		userID, folderID, fileHeader.Filename, fileHeader.Size, detectedMIME, objectKey).
 		Scan(&out.ID, &out.FolderID, &out.Name, &out.Size, &out.Mime, &out.S3Key, &out.CreatedAt); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist file metadata"})
 		return
@@ -146,4 +176,21 @@ func buildObjectKey(userID, filename string) (string, error) {
 		return "", errors.New("empty user id")
 	}
 	return fmt.Sprintf("%s/%d-%s%s", trimmedUser, time.Now().UTC().UnixNano(), hex.EncodeToString(random), ext), nil
+}
+
+func detectMIMEAndPrepareReader(file io.Reader) (string, io.Reader, error) {
+	header := make([]byte, 512)
+	n, err := file.Read(header)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", nil, err
+	}
+	header = header[:n]
+
+	detected := strings.ToLower(strings.TrimSpace(http.DetectContentType(header)))
+	if mediaType, _, parseErr := mime.ParseMediaType(detected); parseErr == nil {
+		detected = strings.ToLower(mediaType)
+	}
+
+	reader := io.MultiReader(bytes.NewReader(header), file)
+	return detected, reader, nil
 }
