@@ -2,7 +2,9 @@ package files
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -19,6 +21,9 @@ import (
 	minioClient "cloudstore/backend/internal/storage/minio"
 	"github.com/gin-gonic/gin"
 )
+
+// ErrQuotaExceeded is returned when user storage would exceed quota.
+var ErrQuotaExceeded = errors.New("storage quota exceeded")
 
 // Handler provides files endpoints.
 type Handler struct {
@@ -116,25 +121,100 @@ func (h *Handler) Upload(c *gin.Context) {
 		return
 	}
 
-	if err := h.storage.PutObject(c.Request.Context(), objectKey, streamReader, fileHeader.Size, detectedMIME); err != nil {
+	ctx := c.Request.Context()
+	out, err := h.reserveUploadInDB(ctx, userID, folderID, fileHeader.Filename, fileHeader.Size, detectedMIME, objectKey)
+	if errors.Is(err, ErrQuotaExceeded) {
+		c.JSON(http.StatusInsufficientStorage, gin.H{"error": "storage quota exceeded"})
+		return
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reserve upload"})
+		return
+	}
+
+	if err := h.storage.PutObject(ctx, objectKey, streamReader, fileHeader.Size, detectedMIME); err != nil {
+		if rbErr := h.releaseUploadReservation(ctx, out.ID, userID, fileHeader.Size); rbErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload file and rollback quota"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload file"})
 		return
 	}
 
-	const query = `
+	c.JSON(http.StatusCreated, out)
+}
+
+func (h *Handler) reserveUploadInDB(ctx context.Context, userID string, folderID int64, filename string, size int64, mimeType, objectKey string) (uploadResponse, error) {
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return uploadResponse{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var used, quota int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT storage_used_bytes, storage_quota_bytes
+		FROM users
+		WHERE id = $1
+		FOR UPDATE
+	`, userID).Scan(&used, &quota)
+	if err != nil {
+		return uploadResponse{}, err
+	}
+	if used+size > quota {
+		return uploadResponse{}, ErrQuotaExceeded
+	}
+
+	var out uploadResponse
+	err = tx.QueryRowContext(ctx, `
 		INSERT INTO files (user_id, folder_id, name, size, mime, s3_key)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, folder_id, name, size, mime, s3_key, created_at
-	`
-	var out uploadResponse
-	if err := h.db.QueryRowContext(c.Request.Context(), query,
-		userID, folderID, fileHeader.Filename, fileHeader.Size, detectedMIME, objectKey).
-		Scan(&out.ID, &out.FolderID, &out.Name, &out.Size, &out.Mime, &out.S3Key, &out.CreatedAt); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist file metadata"})
-		return
+	`, userID, folderID, filename, size, mimeType, objectKey).
+		Scan(&out.ID, &out.FolderID, &out.Name, &out.Size, &out.Mime, &out.S3Key, &out.CreatedAt)
+	if err != nil {
+		return uploadResponse{}, err
 	}
 
-	c.JSON(http.StatusCreated, out)
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE users
+		SET storage_used_bytes = storage_used_bytes + $1
+		WHERE id = $2
+	`, size, userID); err != nil {
+		return uploadResponse{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return uploadResponse{}, err
+	}
+	return out, nil
+}
+
+func (h *Handler) releaseUploadReservation(ctx context.Context, fileID int64, userID string, size int64) error {
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM files
+		WHERE id = $1 AND user_id = $2
+	`, fileID, userID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE users
+		SET storage_used_bytes = GREATEST(0, storage_used_bytes - $1)
+		WHERE id = $2
+	`, size, userID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (h *Handler) folderBelongsToUser(c *gin.Context, userID string, folderID int64) (bool, error) {
