@@ -127,6 +127,7 @@ func main() {
 	allowedMIMEs := strings.Split(cfg.UploadAllowedMIMEs, ",")
 	filesHandler := files.NewHandler(db, storage, int64(cfg.UploadMaxSizeMB)*1024*1024, allowedMIMEs)
 	protected.POST("/upload", filesHandler.Upload)
+	protected.GET("/download", filesHandler.Download)
 	protected.POST("/folders", foldersHandler.Create)
 	protected.GET("/folders/resolve", foldersHandler.ResolvePath)
 	protected.GET("/folders", foldersHandler.List)
