@@ -129,6 +129,7 @@ func main() {
 	protected.POST("/upload", filesHandler.Upload)
 	protected.GET("/download", filesHandler.Download)
 	protected.GET("/files", filesHandler.List)
+	protected.PATCH("/files/:id", filesHandler.Patch)
 	protected.POST("/folders", foldersHandler.Create)
 	protected.GET("/folders/resolve", foldersHandler.ResolvePath)
 	protected.GET("/folders", foldersHandler.List)
