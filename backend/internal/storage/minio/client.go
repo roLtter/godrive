@@ -3,6 +3,7 @@ package minio
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"strings"
 	"time"
@@ -76,4 +77,15 @@ func (c *Client) PresignedGetURL(ctx context.Context, objectName string) (*url.U
 		return nil, fmt.Errorf("minio client: create presigned get url: %w", err)
 	}
 	return url, nil
+}
+
+// PutObject uploads stream into MinIO bucket.
+func (c *Client) PutObject(ctx context.Context, objectName string, reader io.Reader, size int64, contentType string) error {
+	_, err := c.sdkClient.PutObject(ctx, c.bucketName, objectName, reader, size, minio.PutObjectOptions{
+		ContentType: contentType,
+	})
+	if err != nil {
+		return fmt.Errorf("minio client: put object: %w", err)
+	}
+	return nil
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"strings"
 	"time"
 
 	"cloudstore/backend/internal/auth"
@@ -10,6 +11,7 @@ import (
 	"cloudstore/backend/internal/config"
 	postgresClient "cloudstore/backend/internal/db/postgres"
 	_ "cloudstore/backend/internal/dbmigrate"
+	"cloudstore/backend/internal/files"
 	"cloudstore/backend/internal/folders"
 	"cloudstore/backend/internal/logger"
 	"cloudstore/backend/internal/middleware"
@@ -81,14 +83,15 @@ func main() {
 		zap.Int("min_idle_conns", cfg.RedisMinIdle),
 	)
 
-	if _, err := minioClient.New(
+	storage, err := minioClient.New(
 		context.Background(),
 		cfg.MinIOURL,
 		cfg.MinIORootUser,
 		cfg.MinIORootPass,
 		cfg.MinIOBucket,
 		cfg.PresignTTLMin,
-	); err != nil {
+	)
+	if err != nil {
 		zlog.Fatal("failed to init minio client", zap.Error(err))
 	}
 	zlog.Info("minio client initialized",
@@ -121,6 +124,12 @@ func main() {
 	protected := router.Group("/api")
 	protected.Use(middleware.JWTAuth(cfg.JWTSecret))
 	foldersHandler := folders.NewHandler(db)
+	allowedMIMEs := strings.Split(cfg.UploadAllowedMIMEs, ",")
+	filesHandler := files.NewHandler(db, storage, int64(cfg.UploadMaxSizeMB)*1024*1024, allowedMIMEs)
+	protected.POST("/upload", filesHandler.Upload)
+	protected.GET("/download", filesHandler.Download)
+	protected.GET("/files", filesHandler.List)
+	protected.PATCH("/files/:id", filesHandler.Patch)
 	protected.POST("/folders", foldersHandler.Create)
 	protected.GET("/folders/resolve", foldersHandler.ResolvePath)
 	protected.GET("/folders", foldersHandler.List)
