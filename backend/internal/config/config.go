@@ -21,6 +21,9 @@ const (
 	defaultRateLimitWindowSec = 60
 	defaultUploadMaxSizeMB = 20
 	defaultUploadAllowedMIMEs = "image/jpeg,image/png,image/webp,application/pdf,text/plain"
+	defaultWorkerCleanupIntervalSec = 300
+	defaultWorkerCleanupBatch       = 50
+	defaultTrashMinAgeMinutes       = 1440
 )
 
 // Config is the single source of runtime environment settings.
@@ -45,6 +48,9 @@ type Config struct {
 	Port           string
 	AppEnv         string
 	MigrationsPath string
+	WorkerCleanupIntervalSec int
+	WorkerCleanupBatch       int
+	TrashMinAgeMinutes       int
 }
 
 // Load reads application configuration from environment and validates it.
@@ -67,6 +73,9 @@ func Load() (Config, error) {
 	v.SetDefault("UPLOAD_ALLOWED_MIMES", defaultUploadAllowedMIMEs)
 	v.SetDefault("JWT_ACCESS_TTL_MIN", defaultJWTAccessTTLMin)
 	v.SetDefault("JWT_REFRESH_TTL_MIN", defaultJWTRefreshTTLMin)
+	v.SetDefault("WORKER_CLEANUP_INTERVAL_SEC", defaultWorkerCleanupIntervalSec)
+	v.SetDefault("WORKER_CLEANUP_BATCH", defaultWorkerCleanupBatch)
+	v.SetDefault("TRASH_MIN_AGE_MINUTES", defaultTrashMinAgeMinutes)
 
 	cfg := Config{
 		DBURL:          v.GetString("DB_URL"),
@@ -88,7 +97,10 @@ func Load() (Config, error) {
 		PresignTTLMin:  v.GetInt("MINIO_PRESIGN_TTL_MIN"),
 		Port:           v.GetString("PORT"),
 		AppEnv:         v.GetString("APP_ENV"),
-		MigrationsPath: v.GetString("MIGRATIONS_PATH"),
+		MigrationsPath:           v.GetString("MIGRATIONS_PATH"),
+		WorkerCleanupIntervalSec: v.GetInt("WORKER_CLEANUP_INTERVAL_SEC"),
+		WorkerCleanupBatch:       v.GetInt("WORKER_CLEANUP_BATCH"),
+		TrashMinAgeMinutes:       v.GetInt("TRASH_MIN_AGE_MINUTES"),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -144,6 +156,17 @@ func (c Config) Validate() error {
 	}
 	if c.PresignTTLMin <= 0 {
 		return fmt.Errorf("config validation failed: MINIO_PRESIGN_TTL_MIN must be > 0")
+	}
+	if c.WorkerCleanupIntervalSec < 0 {
+		return fmt.Errorf("config validation failed: WORKER_CLEANUP_INTERVAL_SEC must be >= 0")
+	}
+	if c.WorkerCleanupIntervalSec > 0 {
+		if c.WorkerCleanupBatch <= 0 {
+			return fmt.Errorf("config validation failed: WORKER_CLEANUP_BATCH must be > 0 when worker is enabled")
+		}
+		if c.TrashMinAgeMinutes < 0 {
+			return fmt.Errorf("config validation failed: TRASH_MIN_AGE_MINUTES must be >= 0")
+		}
 	}
 	return nil
 }

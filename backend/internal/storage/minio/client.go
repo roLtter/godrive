@@ -89,3 +89,11 @@ func (c *Client) PutObject(ctx context.Context, objectName string, reader io.Rea
 	}
 	return nil
 }
+
+// RemoveObject deletes an object from the bucket.
+func (c *Client) RemoveObject(ctx context.Context, objectName string) error {
+	if err := c.sdkClient.RemoveObject(ctx, c.bucketName, objectName, minio.RemoveObjectOptions{}); err != nil {
+		return fmt.Errorf("minio client: remove object: %w", err)
+	}
+	return nil
+}

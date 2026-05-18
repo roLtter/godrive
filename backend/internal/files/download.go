@@ -31,7 +31,7 @@ func (h *Handler) Download(c *gin.Context) {
 	const query = `
 		SELECT s3_key
 		FROM files
-		WHERE id = $1 AND user_id = $2
+		WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
 		LIMIT 1
 	`
 	var s3Key string

@@ -16,6 +16,7 @@ import (
 	"cloudstore/backend/internal/logger"
 	"cloudstore/backend/internal/middleware"
 	minioClient "cloudstore/backend/internal/storage/minio"
+	"cloudstore/backend/internal/worker"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -99,6 +100,16 @@ func main() {
 		zap.Int("presign_ttl_min", cfg.PresignTTLMin),
 	)
 
+	if cfg.WorkerCleanupIntervalSec > 0 {
+		fileCleanup := worker.NewDeletedFilesCleanup(db, storage, cfg)
+		go fileCleanup.Run(context.Background())
+		zlog.Info("deleted files cleanup worker started",
+			zap.Int("interval_sec", cfg.WorkerCleanupIntervalSec),
+			zap.Int("batch", cfg.WorkerCleanupBatch),
+			zap.Int("trash_min_age_minutes", cfg.TrashMinAgeMinutes),
+		)
+	}
+
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(middleware.RequestLogger(zlog))
@@ -128,8 +139,10 @@ func main() {
 	filesHandler := files.NewHandler(db, storage, int64(cfg.UploadMaxSizeMB)*1024*1024, allowedMIMEs)
 	protected.POST("/upload", filesHandler.Upload)
 	protected.GET("/download", filesHandler.Download)
+	protected.GET("/files/trash", filesHandler.ListTrash)
 	protected.GET("/files", filesHandler.List)
 	protected.PATCH("/files/:id", filesHandler.Patch)
+	protected.DELETE("/files/:id", filesHandler.SoftDelete)
 	protected.POST("/folders", foldersHandler.Create)
 	protected.GET("/folders/resolve", foldersHandler.ResolvePath)
 	protected.GET("/folders", foldersHandler.List)

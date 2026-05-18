@@ -79,7 +79,7 @@ func (h *Handler) Patch(c *gin.Context) {
 		err = h.db.QueryRowContext(ctx, `
 			UPDATE files
 			SET name = $1, folder_id = $2
-			WHERE id = $3 AND user_id = $4
+			WHERE id = $3 AND user_id = $4 AND deleted_at IS NULL
 			RETURNING id, folder_id, name, size, mime, s3_key, created_at
 		`, newName, newFolderID, fileID, userID).Scan(
 			&out.ID, &out.FolderID, &out.Name, &out.Size, &out.Mime, &out.S3Key, &out.CreatedAt,
@@ -88,7 +88,7 @@ func (h *Handler) Patch(c *gin.Context) {
 		err = h.db.QueryRowContext(ctx, `
 			UPDATE files
 			SET name = $1
-			WHERE id = $2 AND user_id = $3
+			WHERE id = $2 AND user_id = $3 AND deleted_at IS NULL
 			RETURNING id, folder_id, name, size, mime, s3_key, created_at
 		`, newName, fileID, userID).Scan(
 			&out.ID, &out.FolderID, &out.Name, &out.Size, &out.Mime, &out.S3Key, &out.CreatedAt,
@@ -97,7 +97,7 @@ func (h *Handler) Patch(c *gin.Context) {
 		err = h.db.QueryRowContext(ctx, `
 			UPDATE files
 			SET folder_id = $1
-			WHERE id = $2 AND user_id = $3
+			WHERE id = $2 AND user_id = $3 AND deleted_at IS NULL
 			RETURNING id, folder_id, name, size, mime, s3_key, created_at
 		`, newFolderID, fileID, userID).Scan(
 			&out.ID, &out.FolderID, &out.Name, &out.Size, &out.Mime, &out.S3Key, &out.CreatedAt,
