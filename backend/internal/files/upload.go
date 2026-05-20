@@ -18,7 +18,6 @@ import (
 
 	"cloudstore/backend/internal/db/postgres"
 	"cloudstore/backend/internal/middleware"
-	minioClient "cloudstore/backend/internal/storage/minio"
 	"github.com/gin-gonic/gin"
 )
 
@@ -27,10 +26,10 @@ var ErrQuotaExceeded = errors.New("storage quota exceeded")
 
 // Handler provides files endpoints.
 type Handler struct {
-	db           *postgres.Client
-	storage      *minioClient.Client
+	db            *postgres.Client
+	storage       ObjectStorage
 	maxUploadSize int64
-	allowedMIME  map[string]struct{}
+	allowedMIME   map[string]struct{}
 }
 
 type uploadResponse struct {
@@ -44,7 +43,7 @@ type uploadResponse struct {
 }
 
 // NewHandler creates files handler.
-func NewHandler(db *postgres.Client, storage *minioClient.Client, maxUploadSizeBytes int64, allowedMIMEs []string) *Handler {
+func NewHandler(db *postgres.Client, storage ObjectStorage, maxUploadSizeBytes int64, allowedMIMEs []string) *Handler {
 	allowed := make(map[string]struct{}, len(allowedMIMEs))
 	for _, item := range allowedMIMEs {
 		value := strings.TrimSpace(strings.ToLower(item))
@@ -136,7 +135,7 @@ func (h *Handler) Upload(c *gin.Context) {
 		return
 	}
 
-	if err := h.storage.PutObject(ctx, objectKey, streamReader, fileHeader.Size, detectedMIME); err != nil {
+	if err := h.storage.PutObject(ctx, out.S3Key, streamReader, fileHeader.Size, detectedMIME); err != nil {
 		if rbErr := h.releaseUploadReservation(ctx, out.ID, userID, fileHeader.Size); rbErr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload file and rollback quota"})
 			return
