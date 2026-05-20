@@ -17,12 +17,25 @@ import (
 	"time"
 
 	"cloudstore/backend/internal/db/postgres"
+	"cloudstore/backend/internal/logger"
 	"cloudstore/backend/internal/middleware"
 	"github.com/gin-gonic/gin"
+	"github.com/minio/minio-go/v7"
+	"go.uber.org/zap"
 )
 
 // ErrQuotaExceeded is returned when user storage would exceed quota.
 var ErrQuotaExceeded = errors.New("storage quota exceeded")
+
+// uploadObjectKeyHook is set by tests for deterministic keys (same package only).
+var uploadObjectKeyHook func(userID, filename string) (string, error)
+
+func objectKeyForUpload(userID, filename string) (string, error) {
+	if uploadObjectKeyHook != nil {
+		return uploadObjectKeyHook(userID, filename)
+	}
+	return buildObjectKey(userID, filename)
+}
 
 // Handler provides files endpoints.
 type Handler struct {
@@ -104,7 +117,7 @@ func (h *Handler) Upload(c *gin.Context) {
 	}
 	defer file.Close()
 
-	objectKey, err := buildObjectKey(userID, fileHeader.Filename)
+	objectKey, err := objectKeyForUpload(userID, fileHeader.Filename)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare upload key"})
 		return
@@ -121,30 +134,40 @@ func (h *Handler) Upload(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	out, err := h.reserveUploadInDB(ctx, userID, folderID, fileHeader.Filename, fileHeader.Size, detectedMIME, objectKey)
-	if errors.Is(err, ErrQuotaExceeded) {
-		c.JSON(http.StatusInsufficientStorage, gin.H{"error": "storage quota exceeded"})
-		return
-	}
-	if errors.Is(err, sql.ErrNoRows) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
-		return
-	}
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reserve upload"})
-		return
-	}
-
-	if err := h.storage.PutObject(ctx, out.S3Key, streamReader, fileHeader.Size, detectedMIME); err != nil {
-		if rbErr := h.releaseUploadReservation(ctx, out.ID, userID, fileHeader.Size); rbErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload file and rollback quota"})
-			return
-		}
+	if err := h.storage.PutObject(ctx, objectKey, streamReader, fileHeader.Size, detectedMIME); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload file"})
 		return
 	}
 
+	out, err := h.reserveUploadInDB(ctx, userID, folderID, fileHeader.Filename, fileHeader.Size, detectedMIME, objectKey)
+	if err != nil {
+		h.cleanupOrphanMinIOObject(ctx, objectKey)
+		if errors.Is(err, ErrQuotaExceeded) {
+			c.JSON(http.StatusInsufficientStorage, gin.H{"error": "storage quota exceeded"})
+			return
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reserve upload"})
+		return
+	}
+
 	c.JSON(http.StatusCreated, out)
+}
+
+func (h *Handler) cleanupOrphanMinIOObject(ctx context.Context, objectKey string) {
+	if err := h.storage.RemoveObject(ctx, objectKey); err != nil {
+		resp := minio.ToErrorResponse(err)
+		if resp.Code == "NoSuchKey" || resp.StatusCode == 404 {
+			return
+		}
+		logger.L().Warn("failed to remove orphan minio object after db error",
+			zap.String("s3_key", objectKey),
+			zap.Error(err),
+		)
+	}
 }
 
 func (h *Handler) reserveUploadInDB(ctx context.Context, userID string, folderID int64, filename string, size int64, mimeType, objectKey string) (uploadResponse, error) {
@@ -191,29 +214,6 @@ func (h *Handler) reserveUploadInDB(ctx context.Context, userID string, folderID
 		return uploadResponse{}, err
 	}
 	return out, nil
-}
-
-func (h *Handler) releaseUploadReservation(ctx context.Context, fileID int64, userID string, size int64) error {
-	tx, err := h.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM files
-		WHERE id = $1 AND user_id = $2
-	`, fileID, userID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE users
-		SET storage_used_bytes = GREATEST(0, storage_used_bytes - $1)
-		WHERE id = $2
-	`, size, userID); err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 func (h *Handler) folderBelongsToUser(c *gin.Context, userID string, folderID int64) (bool, error) {

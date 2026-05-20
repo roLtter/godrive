@@ -28,7 +28,8 @@ var testJPEGBytes = []byte{
 }
 
 type fakeObjectStorage struct {
-	putKeys []string
+	putKeys    []string
+	removeKeys []string
 }
 
 func (f *fakeObjectStorage) PutObject(_ context.Context, objectName string, r io.Reader, _ int64, _ string) error {
@@ -41,8 +42,14 @@ func (f *fakeObjectStorage) PresignedGetURL(_ context.Context, objectName string
 	return url.Parse("https://example.test/presigned?object=" + url.PathEscape(objectName))
 }
 
+func (f *fakeObjectStorage) RemoveObject(_ context.Context, objectName string) error {
+	f.removeKeys = append(f.removeKeys, objectName)
+	return nil
+}
+
 func TestIntegration_UploadDownloadDeleteFlow(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { uploadObjectKeyHook = nil })
 
 	const (
 		jwtSecret = "integration-files-secret"
@@ -52,6 +59,8 @@ func TestIntegration_UploadDownloadDeleteFlow(t *testing.T) {
 	)
 
 	fixedS3Key := userID + "/integration-test-object.bin"
+	uploadObjectKeyHook = func(_, _ string) (string, error) { return fixedS3Key, nil }
+
 	createdAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	fileSize := int64(len(testJPEGBytes))
 
@@ -70,7 +79,7 @@ func TestIntegration_UploadDownloadDeleteFlow(t *testing.T) {
 		WithArgs(userID).
 		WillReturnRows(sqlmock.NewRows([]string{"storage_used_bytes", "storage_quota_bytes"}).AddRow(int64(0), int64(1<<30)))
 	mock.ExpectQuery(`INSERT INTO files`).
-		WithArgs(userID, folderID, "test.jpg", fileSize, "image/jpeg", sqlmock.AnyArg()).
+		WithArgs(userID, folderID, "test.jpg", fileSize, "image/jpeg", fixedS3Key).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "folder_id", "name", "size", "mime", "s3_key", "created_at"}).
 			AddRow(fileID, folderID, "test.jpg", fileSize, "image/jpeg", fixedS3Key, createdAt))
 	mock.ExpectExec(`UPDATE users`).
