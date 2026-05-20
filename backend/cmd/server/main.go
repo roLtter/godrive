@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"strings"
 	"time"
 
 	"cloudstore/backend/internal/auth"
@@ -10,9 +11,12 @@ import (
 	"cloudstore/backend/internal/config"
 	postgresClient "cloudstore/backend/internal/db/postgres"
 	_ "cloudstore/backend/internal/dbmigrate"
+	"cloudstore/backend/internal/files"
+	"cloudstore/backend/internal/folders"
 	"cloudstore/backend/internal/logger"
 	"cloudstore/backend/internal/middleware"
 	minioClient "cloudstore/backend/internal/storage/minio"
+	"cloudstore/backend/internal/worker"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -80,20 +84,31 @@ func main() {
 		zap.Int("min_idle_conns", cfg.RedisMinIdle),
 	)
 
-	if _, err := minioClient.New(
+	storage, err := minioClient.New(
 		context.Background(),
 		cfg.MinIOURL,
 		cfg.MinIORootUser,
 		cfg.MinIORootPass,
 		cfg.MinIOBucket,
 		cfg.PresignTTLMin,
-	); err != nil {
+	)
+	if err != nil {
 		zlog.Fatal("failed to init minio client", zap.Error(err))
 	}
 	zlog.Info("minio client initialized",
 		zap.String("bucket", cfg.MinIOBucket),
 		zap.Int("presign_ttl_min", cfg.PresignTTLMin),
 	)
+
+	if cfg.WorkerCleanupIntervalSec > 0 {
+		fileCleanup := worker.NewDeletedFilesCleanup(db, storage, cfg)
+		go fileCleanup.Run(context.Background())
+		zlog.Info("deleted files cleanup worker started",
+			zap.Int("interval_sec", cfg.WorkerCleanupIntervalSec),
+			zap.Int("batch", cfg.WorkerCleanupBatch),
+			zap.Int("trash_min_age_minutes", cfg.TrashMinAgeMinutes),
+		)
+	}
 
 	router := gin.New()
 	router.Use(gin.Recovery())
@@ -119,6 +134,21 @@ func main() {
 
 	protected := router.Group("/api")
 	protected.Use(middleware.JWTAuth(cfg.JWTSecret))
+	foldersHandler := folders.NewHandler(db)
+	allowedMIMEs := strings.Split(cfg.UploadAllowedMIMEs, ",")
+	filesHandler := files.NewHandler(db, storage, int64(cfg.UploadMaxSizeMB)*1024*1024, allowedMIMEs)
+	protected.POST("/upload", filesHandler.Upload)
+	protected.GET("/download", filesHandler.Download)
+	protected.GET("/files/trash", filesHandler.ListTrash)
+	protected.GET("/files", filesHandler.List)
+	protected.PATCH("/files/:id", filesHandler.Patch)
+	protected.DELETE("/files/:id", filesHandler.SoftDelete)
+	protected.POST("/folders", foldersHandler.Create)
+	protected.GET("/folders/resolve", foldersHandler.ResolvePath)
+	protected.GET("/folders", foldersHandler.List)
+	protected.GET("/folders/:id/breadcrumbs", foldersHandler.Breadcrumbs)
+	protected.PATCH("/folders/:id", foldersHandler.Rename)
+	protected.DELETE("/folders/:id", foldersHandler.Delete)
 	protected.GET("/me", func(c *gin.Context) {
 		userID, _ := c.Get(middleware.ContextUserIDKey)
 		email, _ := c.Get(middleware.ContextUserEmailKey)
