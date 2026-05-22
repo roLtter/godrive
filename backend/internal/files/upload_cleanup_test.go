@@ -59,7 +59,7 @@ func TestUpload_RemovesMinIOObjectWhenDBReserveFails(t *testing.T) {
 	r := gin.New()
 	api := r.Group("/api")
 	api.Use(middleware.JWTAuth(jwtSecret))
-	api.POST("/upload", h.Upload)
+	api.POST("/files/upload", h.Upload)
 
 	body := &bytes.Buffer{}
 	mp := multipart.NewWriter(body)
@@ -68,7 +68,7 @@ func TestUpload_RemovesMinIOObjectWhenDBReserveFails(t *testing.T) {
 	_, _ = part.Write(testJPEGBytes)
 	_ = mp.Close()
 
-	req := httptest.NewRequest(http.MethodPost, "/api/upload", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/files/upload", body)
 	req.Header.Set("Content-Type", mp.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()

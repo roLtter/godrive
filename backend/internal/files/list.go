@@ -28,7 +28,7 @@ type fileListItem struct {
 type listFilesResponse struct {
 	Items      []fileListItem `json:"items"`
 	Page       int            `json:"page"`
-	PerPage    int            `json:"per_page"`
+	Limit      int            `json:"limit"`
 	Total      int64          `json:"total"`
 	TotalPages int            `json:"total_pages"`
 }
@@ -41,14 +41,7 @@ func (h *Handler) List(c *gin.Context) {
 		return
 	}
 
-	page := parsePositiveInt(c.DefaultQuery("page", strconv.Itoa(defaultListPage)), defaultListPage)
-	perPage := parsePositiveInt(c.DefaultQuery("per_page", strconv.Itoa(defaultListPerPage)), defaultListPerPage)
-	if perPage > maxListPerPage {
-		perPage = maxListPerPage
-	}
-	if page < 1 {
-		page = 1
-	}
+	page, perPage := listPageSize(c)
 	offset := (page - 1) * perPage
 
 	sortBy := strings.ToLower(strings.TrimSpace(c.DefaultQuery("sort_by", "created_at")))
@@ -142,7 +135,7 @@ func (h *Handler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, listFilesResponse{
 		Items:      items,
 		Page:       page,
-		PerPage:    perPage,
+		Limit:      perPage,
 		Total:      total,
 		TotalPages: totalPages,
 	})

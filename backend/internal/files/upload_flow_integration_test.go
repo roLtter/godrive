@@ -108,8 +108,8 @@ func TestIntegration_UploadDownloadDeleteFlow(t *testing.T) {
 	r := gin.New()
 	api := r.Group("/api")
 	api.Use(middleware.JWTAuth(jwtSecret))
-	api.POST("/upload", h.Upload)
-	api.GET("/download", h.Download)
+	api.POST("/files/upload", h.Upload)
+	api.GET("/files/:id/download", h.DownloadByID)
 	api.DELETE("/files/:id", h.SoftDelete)
 
 	// --- upload ---
@@ -127,7 +127,7 @@ func TestIntegration_UploadDownloadDeleteFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	uploadReq := httptest.NewRequest(http.MethodPost, "/api/upload", body)
+	uploadReq := httptest.NewRequest(http.MethodPost, "/api/files/upload", body)
 	uploadReq.Header.Set("Content-Type", mp.FormDataContentType())
 	uploadReq.Header.Set("Authorization", "Bearer "+token)
 	uploadRec := httptest.NewRecorder()
@@ -150,7 +150,7 @@ func TestIntegration_UploadDownloadDeleteFlow(t *testing.T) {
 	}
 
 	// --- download ---
-	dlReq := httptest.NewRequest(http.MethodGet, "/api/download?file_id="+strconv.FormatInt(fileID, 10), nil)
+	dlReq := httptest.NewRequest(http.MethodGet, "/api/files/"+strconv.FormatInt(fileID, 10)+"/download", nil)
 	dlReq.Header.Set("Authorization", "Bearer "+token)
 	dlRec := httptest.NewRecorder()
 	r.ServeHTTP(dlRec, dlReq)
