@@ -1,8 +1,8 @@
 # godrive
 
-> Self-hosted облачное хранилище файлов.
+> Self-hosted cloud file storage. Upload, organize, and share files — your data, your server.
 
-[English version](README.en.md)
+[Русская версия](README.md)
 
 ![Go](https://img.shields.io/badge/Go-1.25-00ADD8?style=flat&logo=go)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat&logo=postgresql&logoColor=white)
@@ -12,20 +12,20 @@
 
 ---
 
-## Статус
+## Status
 
-| Фаза | Описание | Статус |
-|------|----------|--------|
-| 1 — Foundation | Docker, миграции, health check | ✅ Готово |
-| 2 — Auth | JWT, refresh tokens, rate limiting | ✅ Готово |
-| 3 — File Core | Upload, download, папки, квота | ✅ Готово |
-| 4 — Sharing | Публичные ссылки, TTL, пароли | ⏳ В разработке |
-| 5 — Frontend | React TypeScript UI | ⏳ Запланировано |
-| 6 — Deploy | Production config, CI/CD | ⏳ Запланировано |
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 1 — Foundation | Docker setup, migrations, health check | ✅ Done |
+| 2 — Auth | JWT, refresh tokens, rate limiting | ✅ Done |
+| 3 — File Core | Upload, download, folders, quota | ✅ Done |
+| 4 — Sharing | Public links, TTL, passwords | ⏳ Planned |
+| 5 — Frontend | React TypeScript UI | ⏳ Planned |
+| 6 — Deploy | Production config, CI/CD | ⏳ Planned |
 
 ---
 
-## Структура проекта
+## Project Structure
 
 ```
 godrive/
@@ -61,18 +61,18 @@ godrive/
 └── go.sum
 ```
 
-Имя Go-модуля: `cloudstore`.
+Go module name: `cloudstore`.
 
 ---
 
-## Быстрый старт
+## Quick Start
 
-### Требования
+### Prerequisites
 
-- Docker и Docker Compose
-- Go 1.25+ (для локальной разработки без Docker)
+- Docker & Docker Compose
+- Go 1.25+ (for local development without Docker)
 
-### Запуск в Docker
+### Run with Docker
 
 ```bash
 git clone git@github.com:roLtter/godrive.git
@@ -81,32 +81,32 @@ cd godrive
 docker compose up -d --build
 ```
 
-Проверка:
+Verify:
 
 ```bash
 curl http://localhost:8080/health
 # OK
 ```
 
-### Сервисы
+### Services
 
-| Сервис | URL |
-|--------|-----|
+| Service | URL |
+|---------|-----|
 | API | http://localhost:8080 |
 | MinIO Console | http://localhost:9001 |
 | MinIO API | http://localhost:9000 |
 | PostgreSQL | localhost:5432 |
 | Redis | localhost:6379 |
 
-### Учётные данные по умолчанию
+### Default credentials
 
-| Сервис | Пользователь | Пароль |
-|--------|--------------|--------|
+| Service | User | Password |
+|---------|------|----------|
 | PostgreSQL | cloudstore | cloudstore |
 | Redis | — | cloudstore |
 | MinIO | cloudstore | cloudstore123 |
 
-### Локальный запуск (backend без Docker)
+### Local run (without Docker backend)
 
 ```bash
 docker compose up -d postgres redis minio
@@ -124,72 +124,72 @@ make run
 
 ---
 
-## API
+## API Reference
 
-Публичные auth-эндпоинты. Все `/api/*` требуют заголовок:
+Auth endpoints are public. All `/api/*` endpoints require:
 
 `Authorization: Bearer <access_token>`
 
 ### Auth
 
-| Метод | Путь | Описание |
-|-------|------|----------|
-| POST | `/register` | Регистрация |
-| POST | `/login` | Вход, получение токенов |
-| POST | `/refresh` | Обновление access token |
-| POST | `/logout` | Выход, инвалидация refresh token |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/register` | Create account |
+| POST | `/login` | Login, receive tokens |
+| POST | `/refresh` | Refresh access token |
+| POST | `/logout` | Invalidate refresh token |
 
-### Папки
+### Folders
 
-| Метод | Путь | Описание |
-|-------|------|----------|
-| POST | `/api/folders` | Создать папку |
-| GET | `/api/folders?parent_id=<id>` | Список дочерних папок (корень — без `parent_id`) |
-| GET | `/api/folders/resolve?path=/a/b/c` | Папка по пути + breadcrumbs |
-| GET | `/api/folders/:id/breadcrumbs` | Breadcrumbs для папки |
-| PATCH | `/api/folders/:id` | Переименовать папку |
-| DELETE | `/api/folders/:id` | Удалить папку |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/folders` | Create folder |
+| GET | `/api/folders?parent_id=<id>` | List child folders (root if `parent_id` omitted) |
+| GET | `/api/folders/resolve?path=/a/b/c` | Resolve folder by path + breadcrumbs |
+| GET | `/api/folders/:id/breadcrumbs` | Breadcrumbs for folder |
+| PATCH | `/api/folders/:id` | Rename folder |
+| DELETE | `/api/folders/:id` | Delete folder |
 
-### Файлы
+### Files
 
-| Метод | Путь | Описание |
-|-------|------|----------|
-| POST | `/api/upload` | Загрузка файла (multipart) |
-| GET | `/api/files` | Список файлов (с пагинацией) |
-| GET | `/api/files/trash` | Список удалённых файлов |
-| GET | `/api/download?file_id=<id>` | Скачивание через presigned URL (302 redirect) |
-| PATCH | `/api/files/:id` | Переименовать или переместить файл |
-| DELETE | `/api/files/:id` | Мягкое удаление |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/upload` | Upload file (multipart) |
+| GET | `/api/files` | List files (paginated) |
+| GET | `/api/files/trash` | List soft-deleted files |
+| GET | `/api/download?file_id=<id>` | Download via presigned URL (302 redirect) |
+| PATCH | `/api/files/:id` | Rename or move file |
+| DELETE | `/api/files/:id` | Soft delete |
 
-### Система
+### System
 
-| Метод | Путь | Описание |
-|-------|------|----------|
-| GET | `/health` | Статус сервиса (текст `OK`) |
-| GET | `/api/me` | Текущий пользователь из JWT |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/health` | Service health status (plain text `OK`) |
+| GET | `/api/me` | Current user from JWT |
 
-### Пример: загрузка файла
+### Example: Upload a file
 
 ```bash
-# 1. Вход
+# 1. Login
 curl -X POST http://localhost:8080/login \
   -H "Content-Type: application/json" \
   -d '{"email":"user@example.com","password":"password123"}'
 
-# 2. Создать папку (folder_id обязателен для upload)
+# 2. Create folder (folder_id is required for upload)
 curl -X POST http://localhost:8080/api/folders \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{"name":"Documents"}'
 
-# 3. Загрузка
+# 3. Upload
 curl -X POST http://localhost:8080/api/upload \
   -H "Authorization: Bearer <access_token>" \
   -F "file=@document.pdf" \
   -F "folder_id=1"
 ```
 
-Ответ (201):
+Response (201):
 
 ```json
 {
@@ -203,7 +203,7 @@ curl -X POST http://localhost:8080/api/upload \
 }
 ```
 
-### Пример: скачивание файла
+### Example: Download a file
 
 ```bash
 curl -L "http://localhost:8080/api/download?file_id=42" \
@@ -212,7 +212,7 @@ curl -L "http://localhost:8080/api/download?file_id=42" \
 
 ---
 
-## Схема базы данных
+## Database Schema
 
 ```
 users       — id (UUID), email, password_hash, created_at,
@@ -220,30 +220,31 @@ users       — id (UUID), email, password_hash, created_at,
 
 folders     — id (BIGSERIAL), user_id, parent_id, name
 
-files       — id (BIGSERIAL), user_id, folder_id, name, size, mime, s3_key, created_at, deleted_at
+files       — id (BIGSERIAL), user_id, folder_id, name, size, mime, s3_key,
+              created_at, deleted_at
 
 shares      — id (BIGSERIAL), file_id, token, expires_at, password_hash
-              (таблица есть; API пока не реализован)
+              (table exists; API not implemented yet)
 ```
 
 ---
 
-## Разработка
+## Development
 
-### Команды Makefile
+### Makefile commands
 
 ```bash
-make run          # запуск backend
-make build        # сборка всех пакетов
-make test         # все тесты
-make migrate-up   # применить миграции
-make migrate-down # откатить последнюю миграцию
+make run          # start backend server
+make build        # build all packages
+make test         # run all tests
+make migrate-up   # apply migrations
+make migrate-down # rollback last migration
 ```
 
-### Запуск тестов
+### Running tests
 
 ```bash
-# из корня репозитория
+# from repo root
 go test ./...
 
 go test ./backend/internal/auth/...
