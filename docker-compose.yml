@@ -59,6 +59,7 @@ services:
       APP_ENV: dev
       PORT: "8080"
       MIGRATIONS_PATH: /app/migrations
+      JWT_SECRET: dev-secret-change-me-in-production
     depends_on:
       postgres:
         condition: service_healthy
