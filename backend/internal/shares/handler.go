@@ -160,7 +160,22 @@ func (h *Handler) Resolve(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create download URL"})
 		return
 	}
+	if err := h.trackShareAccess(c, token); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update share access"})
+		return
+	}
 	c.Redirect(http.StatusFound, presigned.String())
+}
+
+func (h *Handler) trackShareAccess(c *gin.Context, token string) error {
+	const query = `
+		UPDATE shares
+		SET download_count = download_count + 1,
+		    last_accessed_at = NOW()
+		WHERE token = $1
+	`
+	_, err := h.db.ExecContext(c.Request.Context(), query, token)
+	return err
 }
 
 func authUserID(c *gin.Context) (string, bool) {

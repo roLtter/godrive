@@ -1,0 +1,3 @@
+ALTER TABLE shares
+    ADD COLUMN download_count BIGINT NOT NULL DEFAULT 0,
+    ADD COLUMN last_accessed_at TIMESTAMPTZ NULL;
