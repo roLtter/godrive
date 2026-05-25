@@ -141,6 +141,8 @@ func main() {
 	filesHandler := files.NewHandler(db, storage, int64(cfg.UploadMaxSizeMB)*1024*1024, allowedMIMEs)
 	router.GET("/s/:token", sharesHandler.Resolve)
 	protected.POST("/shares", sharesHandler.Create)
+	protected.GET("/shares", sharesHandler.ListActive)
+	protected.DELETE("/shares/:id", sharesHandler.Revoke)
 	protected.POST("/files/upload", filesHandler.Upload)
 	protected.GET("/files/trash", filesHandler.ListTrash)
 	protected.GET("/files/:id/download", filesHandler.DownloadByID)

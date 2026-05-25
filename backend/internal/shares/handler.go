@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +37,17 @@ type createShareResponse struct {
 	Token     string    `json:"token"`
 	URL       string    `json:"url"`
 	ExpiresAt time.Time `json:"expires_at"`
+}
+
+type shareListItem struct {
+	ID             int64      `json:"id"`
+	FileID         int64      `json:"file_id"`
+	Token          string     `json:"token"`
+	URL            string     `json:"url"`
+	ExpiresAt      time.Time  `json:"expires_at"`
+	DownloadCount  int64      `json:"download_count"`
+	LastAccessedAt *time.Time `json:"last_accessed_at,omitempty"`
+	CreatedAt      *time.Time `json:"created_at,omitempty"`
 }
 
 // NewHandler creates shares handler.
@@ -102,6 +114,88 @@ func (h *Handler) Create(c *gin.Context) {
 
 	out.URL = publicShareURL(c, out.Token)
 	c.JSON(http.StatusCreated, out)
+}
+
+// ListActive handles GET /api/shares and returns active (not expired) shares for current user.
+func (h *Handler) ListActive(c *gin.Context) {
+	userID, ok := authUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	const query = `
+		SELECT s.id, s.file_id, s.token, s.expires_at, s.download_count, s.last_accessed_at
+		FROM shares s
+		INNER JOIN files f ON f.id = s.file_id
+		WHERE f.user_id = $1
+		  AND f.deleted_at IS NULL
+		  AND s.expires_at > NOW()
+		ORDER BY s.expires_at ASC
+	`
+	rows, err := h.db.QueryContext(c.Request.Context(), query, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list shares"})
+		return
+	}
+	defer rows.Close()
+
+	items := make([]shareListItem, 0)
+	for rows.Next() {
+		var (
+			item     shareListItem
+			lastSeen sql.NullTime
+		)
+		if err := rows.Scan(&item.ID, &item.FileID, &item.Token, &item.ExpiresAt, &item.DownloadCount, &lastSeen); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to scan shares"})
+			return
+		}
+		if lastSeen.Valid {
+			ts := lastSeen.Time
+			item.LastAccessedAt = &ts
+		}
+		item.URL = publicShareURL(c, item.Token)
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list shares"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+// Revoke handles DELETE /api/shares/:id and revokes a share owned by current user.
+func (h *Handler) Revoke(c *gin.Context) {
+	userID, ok := authUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	shareID, err := parsePositiveID(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid share id"})
+		return
+	}
+
+	const query = `
+		DELETE FROM shares s
+		USING files f
+		WHERE s.id = $1
+		  AND f.id = s.file_id
+		  AND f.user_id = $2
+	`
+	result, err := h.db.ExecContext(c.Request.Context(), query, shareID, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to revoke share"})
+		return
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "share not found"})
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // Resolve handles GET /s/:token and redirects to a presigned URL.
@@ -257,4 +351,12 @@ func hashSharePassword(password *string) (*string, error) {
 	}
 	out := string(hashed)
 	return &out, nil
+}
+
+func parsePositiveID(raw string) (int64, error) {
+	id, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || id <= 0 {
+		return 0, errors.New("invalid id")
+	}
+	return id, nil
 }
