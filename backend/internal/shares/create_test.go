@@ -138,6 +138,70 @@ func TestCreateShare_WithTTLAndPassword(t *testing.T) {
 	}
 }
 
+func TestCreateShare_InvalidTTL(t *testing.T) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	client := &postgres.Client{DB: db}
+	h := NewHandler(client, &fakeStorage{})
+
+	router := gin.New()
+	secret := "test-secret"
+	api := router.Group("/api")
+	api.Use(middleware.JWTAuth(secret))
+	api.POST("/shares", h.Create)
+
+	userID := "11111111-1111-1111-1111-111111111111"
+	body := bytes.NewBufferString(`{"file_id":42,"ttl_seconds":0}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/shares", body)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+testToken(t, secret, userID))
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status: want %d, got %d body=%s", http.StatusBadRequest, rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreateShare_ShortPassword(t *testing.T) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	client := &postgres.Client{DB: db}
+	h := NewHandler(client, &fakeStorage{})
+
+	router := gin.New()
+	secret := "test-secret"
+	api := router.Group("/api")
+	api.Use(middleware.JWTAuth(secret))
+	api.POST("/shares", h.Create)
+
+	userID := "11111111-1111-1111-1111-111111111111"
+	body := bytes.NewBufferString(`{"file_id":42,"password":"123"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/shares", body)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+testToken(t, secret, userID))
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status: want %d, got %d body=%s", http.StatusBadRequest, rec.Code, rec.Body.String())
+	}
+}
+
 type anyTimeArg struct{}
 
 func (a anyTimeArg) Match(v driver.Value) bool {
