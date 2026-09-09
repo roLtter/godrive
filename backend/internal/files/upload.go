@@ -72,7 +72,7 @@ func NewHandler(db *postgres.Client, storage ObjectStorage, maxUploadSizeBytes i
 	}
 }
 
-// Upload handles POST /api/upload multipart file upload stream to MinIO.
+// Upload handles POST /api/files/upload multipart file upload stream to MinIO.
 func (h *Handler) Upload(c *gin.Context) {
 	userID, ok := authUserID(c)
 	if !ok {
@@ -129,7 +129,7 @@ func (h *Handler) Upload(c *gin.Context) {
 		return
 	}
 	if _, ok := h.allowedMIME[detectedMIME]; !ok {
-		c.JSON(http.StatusUnsupportedMediaType, gin.H{"error": "unsupported file mime type"})
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "unsupported file mime type"})
 		return
 	}
 
@@ -143,7 +143,7 @@ func (h *Handler) Upload(c *gin.Context) {
 	if err != nil {
 		h.cleanupOrphanMinIOObject(ctx, objectKey)
 		if errors.Is(err, ErrQuotaExceeded) {
-			c.JSON(http.StatusInsufficientStorage, gin.H{"error": "storage quota exceeded"})
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "storage quota exceeded"})
 			return
 		}
 		if errors.Is(err, sql.ErrNoRows) {

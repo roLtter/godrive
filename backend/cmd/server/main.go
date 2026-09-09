@@ -15,6 +15,7 @@ import (
 	"cloudstore/backend/internal/folders"
 	"cloudstore/backend/internal/logger"
 	"cloudstore/backend/internal/middleware"
+	"cloudstore/backend/internal/shares"
 	minioClient "cloudstore/backend/internal/storage/minio"
 	"cloudstore/backend/internal/worker"
 	"github.com/gin-gonic/gin"
@@ -135,18 +136,24 @@ func main() {
 	protected := router.Group("/api")
 	protected.Use(middleware.JWTAuth(cfg.JWTSecret))
 	foldersHandler := folders.NewHandler(db)
+	sharesHandler := shares.NewHandler(db, storage)
 	allowedMIMEs := strings.Split(cfg.UploadAllowedMIMEs, ",")
 	filesHandler := files.NewHandler(db, storage, int64(cfg.UploadMaxSizeMB)*1024*1024, allowedMIMEs)
-	protected.POST("/upload", filesHandler.Upload)
-	protected.GET("/download", filesHandler.Download)
+	router.GET("/s/:token", sharesHandler.Resolve)
+	protected.POST("/shares", sharesHandler.Create)
+	protected.GET("/shares", sharesHandler.ListActive)
+	protected.DELETE("/shares/:id", sharesHandler.Revoke)
+	protected.POST("/files/upload", filesHandler.Upload)
 	protected.GET("/files/trash", filesHandler.ListTrash)
+	protected.GET("/files/:id/download", filesHandler.DownloadByID)
 	protected.GET("/files", filesHandler.List)
 	protected.PATCH("/files/:id", filesHandler.Patch)
 	protected.DELETE("/files/:id", filesHandler.SoftDelete)
 	protected.POST("/folders", foldersHandler.Create)
 	protected.GET("/folders/resolve", foldersHandler.ResolvePath)
-	protected.GET("/folders", foldersHandler.List)
 	protected.GET("/folders/:id/breadcrumbs", foldersHandler.Breadcrumbs)
+	protected.GET("/folders/:id", foldersHandler.GetByID)
+	protected.GET("/folders", foldersHandler.List)
 	protected.PATCH("/folders/:id", foldersHandler.Rename)
 	protected.DELETE("/folders/:id", foldersHandler.Delete)
 	protected.GET("/me", func(c *gin.Context) {

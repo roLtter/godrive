@@ -56,10 +56,11 @@ services:
       MINIO_URL: http://minio:9000
       MINIO_ROOT_USER: cloudstore
       MINIO_ROOT_PASSWORD: cloudstore123
+      # Required by config; use a long random value in real deployments
+      JWT_SECRET: dev-docker-compose-only-not-for-production
       APP_ENV: dev
       PORT: "8080"
       MIGRATIONS_PATH: /app/migrations
-      JWT_SECRET: dev-secret-change-me-in-production
     depends_on:
       postgres:
         condition: service_healthy
